@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Share Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .screen-container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .chat-container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+        #screenShare {
+            width: 100%;
+            max-height: 70vh;
+            background: #000;
+            margin-bottom: 20px;
+        }
+        #chatMessages {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .user-message {
+            background: #e3f2fd;
+            margin-left: 20px;
+        }
+        .assistant-message {
+            background: #f5f5f5;
+            margin-right: 20px;
+        }
+        .input-container {
+            display: flex;
+            gap: 10px;
+        }
+        #userInput {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1976d2;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background: #e8f5e9;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="screen-container">
+            <h2>Screen Share</h2>
+            <div class="status" id="connectionStatus">Not connected</div>
+            <video id="screenShare" autoplay></video>
+            <button id="startShare">Start Screen Share</button>
+            <button id="stopShare" disabled>Stop Share</button>
+        </div>
+        <div class="chat-container">
+            <h2>Chat Assistant</h2>
+            <div id="chatMessages"></div>
+            <div class="input-container">
+                <input type="text" id="userInput" placeholder="Ask about the screen content...">
+                <button id="sendQuery">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO
+        const socket = io();
+        let stream = null;
+        let roomId = null;
+
+        // DOM elements
+        const screenShare = document.getElementById('screenShare');
+        const startShareBtn = document.getElementById('startShare');
+        const stopShareBtn = document.getElementById('stopShare');
+        const userInput = document.getElementById('userInput');
+        const sendQueryBtn = document.getElementById('sendQuery');
+        const chatMessages = document.getElementById('chatMessages');
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        // Generate a unique room ID
+        roomId = 'room_' + Math.random().toString(36).substr(2, 9);
+
+        // Socket.IO event handlers
+        socket.on('connect', () => {
+            connectionStatus.textContent = 'Connected';
+            connectionStatus.style.background = '#e8f5e9';
+            socket.emit('join', { room: roomId });
+        });
+
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.style.background = '#ffebee';
+        });
+
+        socket.on('response', (data) => {
+            if (data.error) {
+                addMessage('Error: ' + data.error, 'error');
+            } else {
+                addMessage(data.response, 'assistant');
+            }
+        });
+
+        // Start screen sharing
+        startShareBtn.addEventListener('click', async () => {
+            try {
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: "always"
+                    },
+                    audio: false
+                });
+                
+                screenShare.srcObject = stream;
+                startShareBtn.disabled = true;
+                stopShareBtn.disabled = false;
+
+                // Start sending frames
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                const videoTrack = stream.getVideoTracks()[0];
+
+                // Send frames every 500ms
+                const frameInterval = setInterval(() => {
+                    if (!stream) {
+                        clearInterval(frameInterval);
+                        return;
+                    }
+
+                    canvas.width = screenShare.videoWidth;
+                    canvas.height = screenShare.videoHeight;
+                    context.drawImage(screenShare, 0, 0, canvas.width, canvas.height);
+                    
+                    const frame = canvas.toDataURL('image/jpeg', 0.5);
+                    socket.emit('stream-frame', {
+                        frame: frame,
+                        room: roomId
+                    });
+                }, 500);
+
+                // Handle stream end
+                videoTrack.onended = () => {
+                    stopSharing();
+                    clearInterval(frameInterval);
+                };
+            } catch (err) {
+                console.error('Error starting screen share:', err);
+                addMessage('Error starting screen share: ' + err.message, 'error');
+            }
+        });
+
+        // Stop screen sharing
+        stopShareBtn.addEventListener('click', stopSharing);
+
+        function stopSharing() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                screenShare.srcObject = null;
+                startShareBtn.disabled = false;
+                stopShareBtn.disabled = true;
+            }
+        }
+
+        // Send user query
+        sendQueryBtn.addEventListener('click', sendQuery);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendQuery();
+            }
+        });
+
+        function sendQuery() {
+            const query = userInput.value.trim();
+            if (query) {
+                socket.emit('query', {
+                    query: query,
+                    room: roomId
+                });
+                addMessage(query, 'user');
+                userInput.value = '';
+            }
+        }
+
+        function addMessage(message, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    </script>
+</body>
+</html>
