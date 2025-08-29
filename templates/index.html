@@ -4,152 +4,59 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Screen Share Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-        }
-        .screen-container {
-            background: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .chat-container {
-            background: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            flex-direction: column;
-            height: 80vh;
-        }
-        #screenShare {
-            width: 100%;
-            max-height: 70vh;
-            background: #000;
-            margin-bottom: 20px;
-        }
-        #chatMessages {
-            flex-grow: 1;
-            overflow-y: auto;
-            margin-bottom: 20px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        .message {
-            margin-bottom: 10px;
-            padding: 8px;
-            border-radius: 4px;
-        }
-        .user-message {
-            background: #e3f2fd;
-            margin-left: 20px;
-        }
-        .assistant-message {
-            background: #f5f5f5;
-            margin-right: 20px;
-        }
-        .input-container {
-            display: flex;
-            gap: 10px;
-        }
-        #userInput {
-            flex-grow: 1;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            padding: 8px 16px;
-            background: #2196f3;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #1976d2;
-        }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        .status {
-            margin-bottom: 10px;
-            padding: 8px;
-            border-radius: 4px;
-            background: #e8f5e9;
-        }
-        .error {
-            background: #ffebee;
-            color: #c62828;
-        }
-    </style>
 </head>
 <body>
-    <div class="container">
-        <div class="screen-container">
-            <h2>Screen Share</h2>
-            <div class="status" id="connectionStatus">Not connected</div>
-            <video id="screenShare" autoplay></video>
-            <button id="startShare">Start Screen Share</button>
-            <button id="stopShare" disabled>Stop Share</button>
-        </div>
-        <div class="chat-container">
-            <h2>Chat Assistant</h2>
-            <div id="chatMessages"></div>
-            <div class="input-container">
-                <input type="text" id="userInput" placeholder="Ask about the screen content...">
-                <button id="sendQuery">Send</button>
-            </div>
-        </div>
+    <div class="app-container">
+        <header class="header">
+            <h1>Screen Share Assistant</h1>
+            <p>Share your screen and get intelligent analysis of the content</p>
+        </header>
+
+        <main class="main-content">
+            <section class="screen-section">
+                <div class="status-bar">
+                    <div id="statusIndicator" class="status-indicator"></div>
+                    <span id="connectionStatus">Not connected</span>
+                </div>
+                
+                <div class="screen-container">
+                    <video id="screenShare" autoplay></video>
+                </div>
+                
+                <div class="controls">
+                    <button id="startShare" class="tooltip">
+                        <span class="tooltip-text">Start sharing your screen</span>
+                        Start Screen Share
+                    </button>
+                    <button id="stopShare" class="stop" disabled>Stop Share</button>
+                </div>
+            </section>
+
+            <section class="chat-section">
+                <h2>AI Assistant</h2>
+                <div class="chat-container">
+                    <div id="chatMessages" class="chat-messages"></div>
+                    <div class="input-container">
+                        <input type="text" 
+                               id="userInput" 
+                               placeholder="Ask about the screen content..."
+                               aria-label="Your message">
+                        <button id="sendQuery">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script>
-        // Simple Socket.IO configuration
+        // Socket.IO configuration
         const socket = io({
             transports: ['websocket'],
             upgrade: false
-        });
-        let stream = null;
-        let roomId = null;
-        let reconnectAttempts = 0;
-        const MAX_RECONNECT_ATTEMPTS = 5;
-
-        // Socket.IO error handling
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            connectionStatus.textContent = `Connection error: ${error.message}`;
-            connectionStatus.style.background = '#ffebee';
-            
-            if (++reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-                addMessage('Failed to connect to server. Please refresh the page or check your connection.', 'error');
-                socket.disconnect();
-            }
-        });
-
-        socket.on('reconnect', (attemptNumber) => {
-            console.log('Reconnected after', attemptNumber, 'attempts');
-            connectionStatus.textContent = 'Reconnected';
-            connectionStatus.style.background = '#e8f5e9';
-            reconnectAttempts = 0;
-        });
-
-        socket.on('reconnect_attempt', () => {
-            connectionStatus.textContent = 'Attempting to reconnect...';
-            connectionStatus.style.background = '#fff3e0';
         });
 
         // DOM elements
@@ -160,37 +67,45 @@
         const sendQueryBtn = document.getElementById('sendQuery');
         const chatMessages = document.getElementById('chatMessages');
         const connectionStatus = document.getElementById('connectionStatus');
+        const statusIndicator = document.getElementById('statusIndicator');
 
-        // Generate a unique room ID
-        roomId = 'room_' + Math.random().toString(36).substr(2, 9);
+        // Generate room ID
+        const roomId = 'room_' + Math.random().toString(36).substr(2, 9);
 
         // Socket.IO event handlers
         socket.on('connect', () => {
             connectionStatus.textContent = 'Connected';
-            connectionStatus.style.background = '#e8f5e9';
+            statusIndicator.classList.add('connected');
             socket.emit('join', { room: roomId });
         });
 
         socket.on('disconnect', () => {
             connectionStatus.textContent = 'Disconnected';
-            connectionStatus.style.background = '#ffebee';
+            statusIndicator.classList.remove('connected');
         });
 
         socket.on('response', (data) => {
             if (data.error) {
-                addMessage('Error: ' + data.error, 'error');
+                addMessage(data.error, 'error');
             } else {
                 addMessage(data.response, 'assistant');
             }
         });
 
-        // Check screen sharing support
-        function checkScreenSharingSupport() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-                addMessage('Screen sharing is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.', 'error');
+        // Screen sharing functionality
+        async function checkScreenSharingSupport() {
+            if (!window.isSecureContext) {
+                addMessage('Screen sharing requires HTTPS or localhost. Please use a secure connection.', 'error');
                 startShareBtn.disabled = true;
                 return false;
             }
+
+            if (!navigator?.mediaDevices?.getDisplayMedia) {
+                addMessage('Screen sharing is not supported in this browser. Please use Chrome, Firefox, or Edge.', 'error');
+                startShareBtn.disabled = true;
+                return false;
+            }
+
             return true;
         }
 
@@ -257,7 +172,7 @@
             }
         }
 
-        // Send user query
+        // Chat functionality
         sendQueryBtn.addEventListener('click', sendQuery);
         userInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
@@ -284,6 +199,9 @@
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
+
+        // Initial support check
+        checkScreenSharingSupport();
     </script>
 </body>
 </html>
